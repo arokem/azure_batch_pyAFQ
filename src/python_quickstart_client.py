@@ -2,9 +2,10 @@ from __future__ import print_function
 import datetime
 import io
 import os
+import os.path as op
 import sys
 import time
-import secrets as config
+import configparser
 try:
     input = raw_input
 except NameError:
@@ -17,6 +18,8 @@ import azure.batch.models as batchmodels
 
 sys.path.append('.')
 sys.path.append('..')
+
+import secrets as config
 
 
 def wrap_commands_in_shell(ostype, commands):
@@ -217,7 +220,8 @@ def create_job(batch_service_client, job_id, pool_id):
 
 
 def add_tasks(batch_service_client, job_id, subject_ids, aws_access_key,
-              aws_secret_key, hcp_aws_access_key, hcp_aws_secret_key):
+              aws_secret_key, hcp_aws_access_key, hcp_aws_secret_key,
+              outbucket):
     """
     Adds a task for each HCP subject.
     """
@@ -229,20 +233,21 @@ def add_tasks(batch_service_client, job_id, subject_ids, aws_access_key,
 
         command = ['python $AZ_BATCH_NODE_SHARED_DIR/{} '
                    '--subject {} --ak {} --sk {}'
-                   '--storagecontainer {} --sastoken "{}"'.format(
+                   '--hcpak {} --hcpsk {} --outbucket {}'.format(
                        config._TASK_FILE,
                        subject_id, #input_file.file_path,
                        aws_access_key,
                        aws_secret_key,
                        hcp_aws_access_key,
-                       hcp_aws_secret_key)
+                       hcp_aws_secret_key,
+                       outbucket)]
 
-        tasks.append(batch.models.TaskAddParameter(
-                'Task{}'.format(idx),
-                common.helpers.wrap_commands_in_shell('linux', command),
-                resource_files=[input_file]
+        tasks.append(
+            batch.models.TaskAddParameter(
+                id='Task{}'.format(idx),
+                command_line=wrap_commands_in_shell('linux', command)
                 )
-        )
+            )
 
     batch_service_client.task.add_collection(job_id, tasks)
 
@@ -396,7 +401,7 @@ if __name__ == '__main__':
         # Pause execution until tasks reach Completed state.
         wait_for_tasks_to_complete(batch_client,
                                    config._JOB_ID,
-                                   datetime.timedelta(minutes=30))
+                                   datetime.timedelta(minutes=secrets._TIMEOUT))
 
         print("  Success! All tasks reached the 'Completed' state within the "
               "specified timeout period.")
@@ -409,8 +414,8 @@ if __name__ == '__main__':
         raise
 
     # Clean up storage resources
-    print('Deleting container [{}]...'.format(input_container_name))
-    blob_client.delete_container(input_container_name)
+    # print('Deleting container [{}]...'.format(input_container_name))
+    # blob_client.delete_container(input_container_name)
 
     # Print out some timing info
     end_time = datetime.datetime.now().replace(microsecond=0)
@@ -420,11 +425,11 @@ if __name__ == '__main__':
     print()
 
     # Clean up Batch resources (if the user so chooses).
-    if query_yes_no('Delete job?') == 'yes':
-        batch_client.job.delete(config._JOB_ID)
+    # if query_yes_no('Delete job?') == 'yes':
+    batch_client.job.delete(config._JOB_ID)
 
-    if query_yes_no('Delete pool?') == 'yes':
-        batch_client.pool.delete(config._POOL_ID)
+    # if query_yes_no('Delete pool?') == 'yes':
+    batch_client.pool.delete(config._POOL_ID)
 
-    print()
-    input('Press ENTER to exit...')
+    # print()
+    # input('Press ENTER to exit...')
