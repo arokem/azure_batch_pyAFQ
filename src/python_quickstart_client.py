@@ -378,6 +378,8 @@ if __name__ == '__main__':
         credentials,
         batch_url=config._BATCH_ACCOUNT_URL)
 
+    subject_ids = [917255, 877168]
+
     try:
         # Create the pool that will contain the compute nodes that will execute the
         # tasks.
@@ -389,7 +391,7 @@ if __name__ == '__main__':
         # Add the tasks to the job:
         add_tasks(batch_client, config._JOB_ID, subject_ids,
                   aws_access_key, aws_secret_key, hcp_aws_access_key,
-                  hcp_aws_secret_key)
+                  hcp_aws_secret_key, config._OUTBUCKET)
 
         # Pause execution until tasks reach Completed state.
         wait_for_tasks_to_complete(batch_client,

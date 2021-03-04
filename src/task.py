@@ -1,26 +1,23 @@
-import AFQ
-import s3fs
+import argparse
 import logging
-import s3fs
 
 from AFQ.data import fetch_hcp
 import AFQ.api as api
 import AFQ.mask as afm
-import numpy as np
-import os.path as op
+
+import s3fs
 
 
-def afq_hcp_retest(subject,
-                   # shell, session, seg_algo, reuse_tractography,
-                   # use_callosal,
-                   aws_access_key, aws_secret_key):
+def afq_hcp(subject,
+            # shell, session, seg_algo, reuse_tractography,
+            # use_callosal,
+            aws_access_key, aws_secret_key, hcp_aws_access_key,
+            hcp_aws_secret_key, outbucket):
 
     logging.basicConfig(level=logging.INFO)
     log = logging.getLogger(__name__) # noqa
 
-    fs = s3fs.S3FileSystem()
-
-    my_hcp_key = "my_bucket/hcp_trt"
+    fs = s3fs.S3FileSystem(aws_access_key, aws_secret_key)
 
     # get HCP data for the given subject / session
     _, hcp_bids = fetch_hcp(
@@ -95,9 +92,9 @@ def afq_hcp_retest(subject,
     # run the AFQ objects
     myafq.export_all()
 
-    # upload the results to my_hcp_key, organized by parameters used
+    # upload the results to outbucket, organized by parameters used
     remote_export_path =\
-        f"{my_hcp_key}/hcp_{session.lower()}_{seg_algo}"
+        f"{outbucket}/hcp_{session.lower()}_{seg_algo}"
     # if use_callosal:
     #     remote_export_path = remote_export_path + "_callosal"
     myafq.upload_to_s3(fs, remote_export_path)
@@ -107,14 +104,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--subject', type=int, required=True,
                         help='subject ID in the HCP dataset')
-    parser.add_argument('--ak', type=int, required=True,
+    parser.add_argument('--ak', type=str, required=True,
                         help='AWS Access Key')
-    parser.add_argument('--sk', type=int, required=True,
+    parser.add_argument('--sk', type=str, required=True,
                         help='AWS Secret Key')
-
-    parser.add_argument('--hcpak', type=int, required=True,
+    parser.add_argument('--hcpak', type=str, required=True,
                         help='AWS Access Key for HCP dataset')
-    parser.add_argument('--hcpsk', type=int, required=True,
+    parser.add_argument('--hcpsk', type=str, required=True,
                         help='AWS Secret Key for HCP dataset')
+    parser.add_argument('--outbucket', type=str, required=True,
+                        help='Where do I put the outputs')
+
     args = parser.parse_args()
-    afq_hcp_retest(args.subject, args.ak, args.sk, args.hcpak, args.hcpsk)
+    afq_hcp(args.subject,
+            args.ak, args.sk,
+            args.hcpak, args.hcpsk)
