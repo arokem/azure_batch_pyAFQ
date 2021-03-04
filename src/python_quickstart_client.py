@@ -4,7 +4,7 @@ import io
 import os
 import sys
 import time
-import config
+import secrets as config
 try:
     input = raw_input
 except NameError:
@@ -19,9 +19,22 @@ sys.path.append('.')
 sys.path.append('..')
 
 
-# Update the Batch and Storage account credential strings in config.py with values
-# unique to your accounts. These are used when constructing connection strings
-# for the Batch and Storage client objects.
+def wrap_commands_in_shell(ostype, commands):
+    """Wrap commands in a shell
+
+    :param list commands: list of commands to wrap
+    :param str ostype: OS type, linux or windows
+    :rtype: str
+    :return: a shell wrapping commands
+    """
+    if ostype.lower() == 'linux':
+        return '/bin/bash -c \'set -e; set -o pipefail; {}; wait\''.format(
+            ';'.join(commands))
+    elif ostype.lower() == 'windows':
+        return 'cmd.exe /c "{}"'.format('&'.join(commands))
+    else:
+        raise ValueError('unknown ostype: {}'.format(ostype))
+
 
 def query_yes_no(question, default="yes"):
     """
@@ -148,6 +161,22 @@ def create_pool(batch_service_client, pool_id):
     # Marketplace image. For more information about creating pools of Linux
     # nodes, see:
     # https://azure.microsoft.com/documentation/articles/batch-linux-nodes/
+
+    task_commands = [
+        # Copy the python_tutorial_task.py script to the "shared" directory
+        # that all tasks that run on the node have access to. Note that
+        # we are using the -p flag with cp to preserve the file uid/gid,
+        # otherwise since this start task is run as an admin, it would not
+        # be accessible by tasks run as a non-admin user.
+        'cp -p {} $AZ_BATCH_NODE_SHARED_DIR'.format(config._TASK_FILE),
+        # Install pip
+        'curl -fSsL https://bootstrap.pypa.io/get-pip.py | python',
+        # Install the azure-storage module so that the task script can access
+        # Azure Blob storage, pre-cryptography version
+        # 'pip install azure-storage==0.32.0',
+        'pip install pyAFQ==0.6.0'
+        ]
+
     new_pool = batch.models.PoolAddParameter(
         id=pool_id,
         virtual_machine_configuration=batchmodels.VirtualMachineConfiguration(
@@ -159,7 +188,12 @@ def create_pool(batch_service_client, pool_id):
             ),
             node_agent_sku_id="batch.node.ubuntu 18.04"),
         vm_size=config._POOL_VM_SIZE,
-        target_dedicated_nodes=config._POOL_NODE_COUNT
+        target_dedicated_nodes=config._POOL_NODE_COUNT,
+        start_task=batch.models.StartTask(
+            command_line=wrap_commands_in_shell(
+                            'linux',
+                             task_commands)
+                            )
     )
     batch_service_client.pool.add(new_pool)
 
@@ -182,31 +216,32 @@ def create_job(batch_service_client, job_id, pool_id):
     batch_service_client.job.add(job)
 
 
-def add_tasks(batch_service_client, job_id, input_files):
+def add_tasks(batch_service_client, job_id, subject_ids, aws_access_key,
+              aws_secret_key, hcp_aws_access_key, hcp_aws_secret_key):
     """
-    Adds a task for each input file in the collection to the specified job.
-
-    :param batch_service_client: A Batch service client.
-    :type batch_service_client: `azure.batch.BatchServiceClient`
-    :param str job_id: The ID of the job to which to add the tasks.
-    :param list input_files: A collection of input files. One task will be
-     created for each input file.
-    :param output_container_sas_token: A SAS token granting write access to
-    the specified Azure Blob storage container.
+    Adds a task for each HCP subject.
     """
-
-    print('Adding {} tasks to job [{}]...'.format(len(input_files), job_id))
+    print('Adding {} tasks to job [{}]...'.format(len(subject_ids), job_id))
 
     tasks = list()
 
-    for idx, input_file in enumerate(input_files):
+    for idx, subject_id in enumerate(subject_ids):
 
-        command = "/bin/bash -c \"cat {}\"".format(input_file.file_path)
+        command = ['python $AZ_BATCH_NODE_SHARED_DIR/{} '
+                   '--subject {} --ak {} --sk {}'
+                   '--storagecontainer {} --sastoken "{}"'.format(
+                       config._TASK_FILE,
+                       subject_id, #input_file.file_path,
+                       aws_access_key,
+                       aws_secret_key,
+                       hcp_aws_access_key,
+                       hcp_aws_secret_key)
+
         tasks.append(batch.models.TaskAddParameter(
-            id='Task{}'.format(idx),
-            command_line=command,
-            resource_files=[input_file]
-        )
+                'Task{}'.format(idx),
+                common.helpers.wrap_commands_in_shell('linux', command),
+                resource_files=[input_file]
+                )
         )
 
     batch_service_client.task.add_collection(job_id, tasks)
@@ -304,25 +339,35 @@ if __name__ == '__main__':
     # Create the blob client, for use in obtaining references to
     # blob storage containers and uploading files to containers.
 
-    blob_client = azureblob.BlockBlobService(
-        account_name=config._STORAGE_ACCOUNT_NAME,
-        account_key=config._STORAGE_ACCOUNT_KEY)
+    # blob_client = azureblob.BlockBlobService(
+    #     account_name=config._STORAGE_ACCOUNT_NAME,
+    #     account_key=config._STORAGE_ACCOUNT_KEY)
 
-    # Use the blob client to create the containers in Azure Storage if they
-    # don't yet exist.
+    # # Use the blob client to create the containers in Azure Storage if they
+    # # don't yet exist.
 
-    input_container_name = 'input'
-    blob_client.create_container(input_container_name, fail_on_exist=False)
+    # input_container_name = 'input'
+    # blob_client.create_container(input_container_name, fail_on_exist=False)
 
-    # The collection of data files that are to be processed by the tasks.
-    input_file_paths = [os.path.join(sys.path[0], 'taskdata0.txt'),
-                        os.path.join(sys.path[0], 'taskdata1.txt'),
-                        os.path.join(sys.path[0], 'taskdata2.txt')]
 
-    # Upload the data files.
-    input_files = [
-        upload_file_to_container(blob_client, input_container_name, file_path)
-        for file_path in input_file_paths]
+
+    # # The collection of data files that are to be processed by the tasks.
+    # input_file_paths = [os.path.join(sys.path[0], 'taskdata0.txt'),
+    #                     os.path.join(sys.path[0], 'taskdata1.txt'),
+    #                     os.path.join(sys.path[0], 'taskdata2.txt')]
+
+    # # Upload the data files.
+    # input_files = [
+    #     upload_file_to_container(blob_client, input_container_name, file_path)
+    #     for file_path in input_file_paths]
+
+    CP = configparser.ConfigParser()
+    CP.read_file(open(op.join(op.expanduser('~'), '.aws', 'credentials')))
+    hcp_aws_access_key = CP.get('hcp', 'AWS_ACCESS_KEY_ID')
+    hcp_aws_secret_key = CP.get('hcp', 'AWS_SECRET_ACCESS_KEY')
+    aws_access_key = CP.get('default', 'AWS_ACCESS_KEY_ID')
+    aws_secret_key = CP.get('default', 'AWS_SECRET_ACCESS_KEY')
+
 
     # Create a Batch service client. We'll now be interacting with the Batch
     # service in addition to Storage
@@ -341,8 +386,10 @@ if __name__ == '__main__':
         # Create the job that will run the tasks.
         create_job(batch_client, config._JOB_ID, config._POOL_ID)
 
-        # Add the tasks to the job.
-        add_tasks(batch_client, config._JOB_ID, input_files)
+        # Add the tasks to the job:
+        add_tasks(batch_client, config._JOB_ID, subject_ids,
+                  aws_access_key, aws_secret_key, hcp_aws_access_key,
+                  hcp_aws_secret_key)
 
         # Pause execution until tasks reach Completed state.
         wait_for_tasks_to_complete(batch_client,
