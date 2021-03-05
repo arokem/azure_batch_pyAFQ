@@ -1,11 +1,11 @@
 import argparse
 import logging
+import s3fs
 
 from AFQ.data import fetch_hcp
 import AFQ.api as api
 import AFQ.mask as afm
 
-import s3fs
 
 
 def afq_hcp(subject,
@@ -13,6 +13,10 @@ def afq_hcp(subject,
             # use_callosal,
             aws_access_key, aws_secret_key, hcp_aws_access_key,
             hcp_aws_secret_key, outbucket):
+
+    # Configuration:
+    seg_algo = "afq"
+    session = "1200"
 
     logging.basicConfig(level=logging.INFO)
     log = logging.getLogger(__name__) # noqa
@@ -23,7 +27,6 @@ def afq_hcp(subject,
     _, hcp_bids = fetch_hcp(
         [subject],
         profile_name=False,
-        study=f"HCP_{session}",
         aws_access_key_id=aws_access_key,
         aws_secret_access_key=aws_secret_key)
 
@@ -55,9 +58,9 @@ def afq_hcp(subject,
     # if "csd" in shell.lower():
     tracking_params["odf_model"] = "CSD"
 
-    # Whether to reuse a previous tractography that has already been uploaded to s3
-    # by another run of this function. Useful if you want to try new parameters that
-    # do not change the tractography.
+    # Whether to reuse a previous tractography that has already been uploaded to
+    # s3 by another run of this function. Useful if you want to try new
+    # parameters that do not change the tractography.
     # if reuse_tractography:
     #     fs.get(
     #         (
@@ -71,10 +74,6 @@ def afq_hcp(subject,
     # else:
     custom_tractography_bids_filters = None
 
-    # Configuration:
-    seg_algo = "afq"
-    session = "1200"
-
     # Initialize the AFQ object with all of the parameters we have set so far
     # Also uses the brain mask provided by HCP
     # Sets viz_backend='plotly' to make GIFs in addition to the default
@@ -82,7 +81,7 @@ def afq_hcp(subject,
     myafq = api.AFQ(
         hcp_bids,
         brain_mask=afm.LabelledMaskFile(
-                    'seg', {'scope':'dmriprep'}, exclusive_labels=[0]),
+                    'seg', {'scope': 'dmriprep'}, exclusive_labels=[0]),
         custom_tractography_bids_filters=custom_tractography_bids_filters,
         tracking_params=tracking_params,
         bundle_info=bundle_info,
@@ -94,7 +93,7 @@ def afq_hcp(subject,
 
     # upload the results to outbucket, organized by parameters used
     remote_export_path =\
-        f"{outbucket}/hcp_{session.lower()}_{seg_algo}"
+        "%s/hcp_1200_%s" % (outbucket, seg_algo)
     # if use_callosal:
     #     remote_export_path = remote_export_path + "_callosal"
     myafq.upload_to_s3(fs, remote_export_path)

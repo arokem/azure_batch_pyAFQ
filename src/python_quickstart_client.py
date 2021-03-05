@@ -16,10 +16,11 @@ import azure.batch.batch_service_client as batch
 import azure.batch.batch_auth as batch_auth
 import azure.batch.models as batchmodels
 
+import secrets as config
+
 sys.path.append('.')
 sys.path.append('..')
 
-import secrets as config
 
 
 def wrap_commands_in_shell(ostype, commands):
@@ -147,7 +148,7 @@ def get_container_sas_token(block_blob_client,
     return container_sas_token
 
 
-def create_pool(batch_service_client, pool_id):
+def create_pool(batch_service_client, pool_id, resource_files):
     """
     Creates a pool of compute nodes with the specified OS settings.
 
@@ -171,13 +172,17 @@ def create_pool(batch_service_client, pool_id):
         # we are using the -p flag with cp to preserve the file uid/gid,
         # otherwise since this start task is run as an admin, it would not
         # be accessible by tasks run as a non-admin user.
+        'apt install -y software-properties-common',
+        'add-apt-repository -y ppa:deadsnakes/ppa',
+        'apt install -y python3.8'
         'cp -p {} $AZ_BATCH_NODE_SHARED_DIR'.format(config._TASK_FILE),
         # Install pip
-        'curl -fSsL https://bootstrap.pypa.io/get-pip.py | python',
+        'curl -fSsL https://bootstrap.pypa.io/get-pip.py | python3',
         # Install the azure-storage module so that the task script can access
         # Azure Blob storage, pre-cryptography version
         # 'pip install azure-storage==0.32.0',
-        'pip install pyAFQ==0.6.0'
+        'pip install s3fs',
+        'pip3 install pyAFQ'
         ]
 
     new_pool = batch.models.PoolAddParameter(
@@ -195,7 +200,8 @@ def create_pool(batch_service_client, pool_id):
         start_task=batch.models.StartTask(
             command_line=wrap_commands_in_shell(
                             'linux',
-                             task_commands)
+                            task_commands),
+            resource_files=resource_files
                             )
     )
     batch_service_client.pool.add(new_pool)
@@ -231,7 +237,7 @@ def add_tasks(batch_service_client, job_id, subject_ids, aws_access_key,
 
     for idx, subject_id in enumerate(subject_ids):
 
-        command = ['python $AZ_BATCH_NODE_SHARED_DIR/{} '
+        command = ['python3 --version && python3 $AZ_BATCH_NODE_SHARED_DIR/{} '
                    '--subject {} --ak {} --sk {}'
                    '--hcpak {} --hcpsk {} --outbucket {}'.format(
                        config._TASK_FILE,
@@ -314,6 +320,15 @@ def print_task_output(batch_service_client, job_id, encoding=None):
         print("Standard output:")
         print(file_text)
 
+        stream = batch_service_client.file.get_from_task(
+            job_id, task.id, config._STANDARD_ERR_FILE_NAME)
+
+        file_text = _read_stream_as_string(
+            stream,
+            encoding)
+        print("Standard output:")
+        print(file_text)
+
 
 def _read_stream_as_string(stream, encoding):
     """Read stream as string
@@ -344,9 +359,9 @@ if __name__ == '__main__':
     # Create the blob client, for use in obtaining references to
     # blob storage containers and uploading files to containers.
 
-    # blob_client = azureblob.BlockBlobService(
-    #     account_name=config._STORAGE_ACCOUNT_NAME,
-    #     account_key=config._STORAGE_ACCOUNT_KEY)
+    blob_client = azureblob.BlockBlobService(
+        account_name=config._STORAGE_ACCOUNT_NAME,
+        account_key=config._STORAGE_ACCOUNT_KEY)
 
     # # Use the blob client to create the containers in Azure Storage if they
     # # don't yet exist.
@@ -365,6 +380,16 @@ if __name__ == '__main__':
     # input_files = [
     #     upload_file_to_container(blob_client, input_container_name, file_path)
     #     for file_path in input_file_paths]
+
+    app_container_name = 'application'
+
+    blob_client.create_container(app_container_name, fail_on_exist=False)
+
+    application_file_paths = [op.realpath(config._TASK_FILE)]
+
+    application_files = [
+        upload_file_to_container(blob_client, app_container_name, file_path)
+        for file_path in application_file_paths]
 
     CP = configparser.ConfigParser()
     CP.read_file(open(op.join(op.expanduser('~'), '.aws', 'credentials')))
@@ -386,9 +411,11 @@ if __name__ == '__main__':
     subject_ids = [917255, 877168]
 
     try:
-        # Create the pool that will contain the compute nodes that will execute the
-        # tasks.
-        create_pool(batch_client, config._POOL_ID)
+        # Create the pool that will contain the compute nodes that will execute
+        # the tasks.
+        create_pool(batch_client,
+                    config._POOL_ID,
+                    application_files)
 
         # Create the job that will run the tasks.
         create_job(batch_client, config._JOB_ID, config._POOL_ID)
@@ -401,12 +428,13 @@ if __name__ == '__main__':
         # Pause execution until tasks reach Completed state.
         wait_for_tasks_to_complete(batch_client,
                                    config._JOB_ID,
-                                   datetime.timedelta(minutes=secrets._TIMEOUT))
+                                   datetime.timedelta(minutes=config._TIMEOUT))
 
         print("  Success! All tasks reached the 'Completed' state within the "
               "specified timeout period.")
 
-        # Print the stdout.txt and stderr.txt files for each task to the console
+        # Print the stdout.txt and stderr.txt files for each task to the
+        # console:
         print_task_output(batch_client, config._JOB_ID)
 
     except batchmodels.BatchErrorException as err:
@@ -414,8 +442,8 @@ if __name__ == '__main__':
         raise
 
     # Clean up storage resources
-    # print('Deleting container [{}]...'.format(input_container_name))
-    # blob_client.delete_container(input_container_name)
+    print('Deleting container [{}]...'.format(app_container_name))
+    blob_client.delete_container(app_container_name)
 
     # Print out some timing info
     end_time = datetime.datetime.now().replace(microsecond=0)
@@ -426,10 +454,10 @@ if __name__ == '__main__':
 
     # Clean up Batch resources (if the user so chooses).
     # if query_yes_no('Delete job?') == 'yes':
-    batch_client.job.delete(config._JOB_ID)
+    # batch_client.job.delete(config._JOB_ID)
 
     # if query_yes_no('Delete pool?') == 'yes':
-    batch_client.pool.delete(config._POOL_ID)
+    # batch_client.pool.delete(config._POOL_ID)
 
     # print()
     # input('Press ENTER to exit...')
