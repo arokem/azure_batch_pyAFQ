@@ -244,8 +244,10 @@ def add_tasks(batch_service_client, job_id, subject_ids, aws_access_key,
         command = [
             'echo $AZ_BATCH_NODE_SHARED_DIR &&'
             'echo $AZ_BATCH_NODE_SHARED_DIR/{} &&'
-            'sleep 120 &&' # We need to sleep here, so that all the content has time to show up in the shared dir (no kidding)
+            'sleep 180 &&'  # We need to sleep here, so that all the content has time to show up in the shared dir (no kidding)
             'ls $AZ_BATCH_NODE_SHARED_DIR/miniconda/ &&'
+            'echo $AZ_BATCH_NODE_SHARED_DIR/miniconda/bin'
+            'ls $AZ_BATCH_NODE_SHARED_DIR/miniconda/bin/ &&'
             'export PATH="$AZ_BATCH_NODE_SHARED_DIR/miniconda/bin/:$PATH" &&'
             'source "$AZ_BATCH_NODE_SHARED_DIR/bin/activate" &&'
             'python $AZ_BATCH_NODE_SHARED_DIR/{} '
