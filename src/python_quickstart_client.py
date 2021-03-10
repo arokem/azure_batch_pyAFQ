@@ -17,6 +17,9 @@ import azure.batch.batch_auth as batch_auth
 import azure.batch.models as batchmodels
 
 import secrets as config
+from importlib import reload
+reload(config)
+
 
 sys.path.append('.')
 sys.path.append('..')
@@ -167,34 +170,35 @@ def create_pool(batch_service_client, pool_id, resource_files):
     # https://azure.microsoft.com/documentation/articles/batch-linux-nodes/
 
     task_commands = [
-        # Copy the python_tutorial_task.py script to the "shared" directory
-        # that all tasks that run on the node have access to. Note that
-        # we are using the -p flag with cp to preserve the file uid/gid,
-        # otherwise since this start task is run as an admin, it would not
-        # be accessible by tasks run as a non-admin user.
-        'apt install -y software-properties-common',
-        'add-apt-repository -y ppa:deadsnakes/ppa',
-        'apt install -y python3.8'
         'cp -p {} $AZ_BATCH_NODE_SHARED_DIR'.format(config._TASK_FILE),
-        # Install pip
-        'curl -fSsL https://bootstrap.pypa.io/get-pip.py | python3',
-        # Install the azure-storage module so that the task script can access
-        # Azure Blob storage, pre-cryptography version
-        # 'pip install azure-storage==0.32.0',
-        'pip install s3fs',
-        'pip3 install pyAFQ'
-        ]
-
-    new_pool = batch.models.PoolAddParameter(
-        id=pool_id,
-        virtual_machine_configuration=batchmodels.VirtualMachineConfiguration(
-            image_reference=batchmodels.ImageReference(
+        '''wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh && \
+        bash miniconda.sh -b -p $AZ_BATCH_NODE_SHARED_DIR/miniconda && \
+        export PATH="$AZ_BATCH_NODE_SHARED_DIR/miniconda/bin:$PATH" && \
+        source "$AZ_BATCH_NODE_SHARED_DIR/miniconda/bin/activate" && \
+        conda install -y -c anaconda -c conda-forge \
+            pip \
+            dipy \
+            s3fs \
+            fury \
+            xvfbwrapper \
+            cvxpy==1.1.* && \
+        echo "Installing conda packages complete!" && \
+        pip install git+https://github.com/yeatmanlab/pyAFQ.git && \
+        echo "Pip installation complete!"'''
+    ]
+    image_ref = batchmodels.ImageReference(
                 publisher="Canonical",
                 offer="UbuntuServer",
                 sku="18.04-LTS",
                 version="latest"
-            ),
-            node_agent_sku_id="batch.node.ubuntu 18.04"),
+            )
+    vm_config = batchmodels.VirtualMachineConfiguration(
+            image_reference=image_ref,
+            node_agent_sku_id="batch.node.ubuntu 18.04")
+
+    new_pool = batch.models.PoolAddParameter(
+        id=pool_id,
+        virtual_machine_configuration=vm_config,
         vm_size=config._POOL_VM_SIZE,
         target_dedicated_nodes=config._POOL_NODE_COUNT,
         start_task=batch.models.StartTask(
@@ -237,16 +241,25 @@ def add_tasks(batch_service_client, job_id, subject_ids, aws_access_key,
 
     for idx, subject_id in enumerate(subject_ids):
 
-        command = ['python3 --version && python3 $AZ_BATCH_NODE_SHARED_DIR/{} '
-                   '--subject {} --ak {} --sk {}'
-                   '--hcpak {} --hcpsk {} --outbucket {}'.format(
-                       config._TASK_FILE,
-                       subject_id, #input_file.file_path,
-                       aws_access_key,
-                       aws_secret_key,
-                       hcp_aws_access_key,
-                       hcp_aws_secret_key,
-                       outbucket)]
+        command = [
+            'echo $AZ_BATCH_NODE_SHARED_DIR &&'
+            'echo $AZ_BATCH_NODE_SHARED_DIR/{} &&'
+            'sleep 120 &&'
+            'ls $AZ_BATCH_NODE_SHARED_DIR/miniconda/ &&'
+            'export PATH="$AZ_BATCH_NODE_SHARED_DIR/miniconda/bin/:$PATH" &&'
+            'source "$AZ_BATCH_NODE_SHARED_DIR/bin/activate" &&'
+            'python $AZ_BATCH_NODE_SHARED_DIR/{} '
+            '--subject {} --ak {} --sk {}'
+            '--hcpak {} --hcpsk {} --outbucket {}'.format(
+                config._TASK_FILE,
+                config._TASK_FILE,
+                subject_id,
+                aws_access_key,
+                aws_secret_key,
+                hcp_aws_access_key,
+                hcp_aws_secret_key,
+                outbucket)
+            ]
 
         tasks.append(
             batch.models.TaskAddParameter(
@@ -317,7 +330,7 @@ def print_task_output(batch_service_client, job_id, encoding=None):
         file_text = _read_stream_as_string(
             stream,
             encoding)
-        print("Standard output:")
+        print("stdout:")
         print(file_text)
 
         stream = batch_service_client.file.get_from_task(
@@ -326,7 +339,7 @@ def print_task_output(batch_service_client, job_id, encoding=None):
         file_text = _read_stream_as_string(
             stream,
             encoding)
-        print("Standard output:")
+        print("stderror:")
         print(file_text)
 
 
@@ -381,7 +394,7 @@ if __name__ == '__main__':
     #     upload_file_to_container(blob_client, input_container_name, file_path)
     #     for file_path in input_file_paths]
 
-    app_container_name = 'application'
+    app_container_name = 'afq'
 
     blob_client.create_container(app_container_name, fail_on_exist=False)
 
@@ -453,11 +466,11 @@ if __name__ == '__main__':
     print()
 
     # Clean up Batch resources (if the user so chooses).
-    # if query_yes_no('Delete job?') == 'yes':
-    # batch_client.job.delete(config._JOB_ID)
+    if query_yes_no('Delete job?') == 'yes':
+        batch_client.job.delete(config._JOB_ID)
 
-    # if query_yes_no('Delete pool?') == 'yes':
-    # batch_client.pool.delete(config._POOL_ID)
+    if query_yes_no('Delete pool?') == 'yes':
+        batch_client.pool.delete(config._POOL_ID)
 
     # print()
-    # input('Press ENTER to exit...')
+    input('Press ENTER to exit...')
