@@ -1,11 +1,11 @@
+
+
 import argparse
 import logging
-import s3fs
-
 from AFQ.data import fetch_hcp
 import AFQ.api as api
 import AFQ.mask as afm
-
+import s3fs
 
 
 def afq_hcp(subject,
@@ -117,4 +117,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
     afq_hcp(args.subject,
             args.ak, args.sk,
-            args.hcpak, args.hcpsk)
+            args.hcpak, args.hcpsk,
+            args.outbucket)

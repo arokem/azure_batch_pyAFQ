@@ -181,10 +181,7 @@ def create_pool(batch_service_client, pool_id, resource_files):
             s3fs \
             fury \
             xvfbwrapper \
-            cvxpy==1.1.* && \
-        echo "Installing conda packages complete!" && \
-        pip install git+https://github.com/yeatmanlab/pyAFQ.git && \
-        echo "Pip installation complete!"'''
+        echo "Installing conda packages complete!"'''
     ]
     image_ref = batchmodels.ImageReference(
                 publisher="Canonical",
@@ -246,12 +243,15 @@ def add_tasks(batch_service_client, job_id, subject_ids, aws_access_key,
             'echo $AZ_BATCH_NODE_SHARED_DIR/{} &&'
             'sleep 180 &&'  # We need to sleep here, so that all the content has time to show up in the shared dir (no kidding)
             'ls $AZ_BATCH_NODE_SHARED_DIR/miniconda/ &&'
-            'echo $AZ_BATCH_NODE_SHARED_DIR/miniconda/bin'
+            'echo $AZ_BATCH_NODE_SHARED_DIR/miniconda/bin &&'
             'ls $AZ_BATCH_NODE_SHARED_DIR/miniconda/bin/ &&'
             'export PATH="$AZ_BATCH_NODE_SHARED_DIR/miniconda/bin/:$PATH" &&'
-            'source "$AZ_BATCH_NODE_SHARED_DIR/bin/activate" &&'
+            'echo $PATH &&'
+            'which python &&'
+            'python -c"import sys; print(sys.executable); print(sys.path)" &&'
+            'python -m pip install git+https://github.com/arokem/pyAFQ.git@no_cvx &&'
             'python $AZ_BATCH_NODE_SHARED_DIR/{} '
-            '--subject {} --ak {} --sk {}'
+            '--subject {} --ak {} --sk {} '
             '--hcpak {} --hcpsk {} --outbucket {}'.format(
                 config._TASK_FILE,
                 config._TASK_FILE,
