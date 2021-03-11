@@ -197,7 +197,7 @@ def create_pool(batch_service_client, pool_id, resource_files):
         id=pool_id,
         virtual_machine_configuration=vm_config,
         vm_size=config._POOL_VM_SIZE,
-        target_dedicated_nodes=config._POOL_NODE_COUNT,
+        target_low_priority_nodes=config._POOL_NODE_COUNT,
         start_task=batch.models.StartTask(
             command_line=wrap_commands_in_shell(
                             'linux',
