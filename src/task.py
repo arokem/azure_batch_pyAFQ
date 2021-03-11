@@ -16,7 +16,6 @@ def afq_hcp(subject,
 
     # Configuration:
     seg_algo = "afq"
-    session = "1200"
 
     logging.basicConfig(level=logging.INFO)
     log = logging.getLogger(__name__) # noqa
@@ -27,8 +26,8 @@ def afq_hcp(subject,
     _, hcp_bids = fetch_hcp(
         [subject],
         profile_name=False,
-        aws_access_key_id=aws_access_key,
-        aws_secret_access_key=aws_secret_key)
+        aws_access_key_id=hcp_aws_access_key,
+        aws_secret_access_key=hcp_aws_secret_key)
 
     # if use_callosal, use the callosal bundles
     # if use_callosal:
